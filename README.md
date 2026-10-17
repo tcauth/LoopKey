@@ -1,3 +1,105 @@
-# Repository setup required :wave:
-    
-Please visit the website URL :point_right: for this repository to complete the setup of this repository and configure access controls.
+# LoopKey
+
+LoopKey completes browser-based Corp or Green authentication on a laptop while
+the OAuth client and credential cache remain on a remote Windows DevBox.
+
+It preserves the native authorization-code and PKCE flow used by `azd`:
+
+```text
+DevBox                                      Laptop
+------                                      ------
+azd listens on localhost:<callback-port>
+LoopKey creates a private Dev Tunnel
+LoopKey publishes a one-time request  --->  loopkey connect <tunnel> <request>
+                                            connects the private tunnel
+                                            opens the default browser
+azd receives the localhost callback   <---  Entra redirects to laptop localhost
+azd validates and stores credentials
+LoopKey verifies the profile           --->  helper reports success and exits
+```
+
+The laptop command does not receive or store access tokens, refresh tokens, or
+the PKCE verifier. The authorization URL is fetched through the authenticated
+private tunnel rather than placed in shell history.
+
+> [!IMPORTANT]
+> LoopKey is an experimental Windows-first prototype. It creates temporary
+> Microsoft Dev Tunnels and starts an interactive `azd auth login`. Review the
+> security model before using it outside a development environment.
+
+## Prerequisites
+
+Both the DevBox and laptop need:
+
+- Windows;
+- [Microsoft Dev Tunnels CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/);
+- an authenticated `devtunnel` identity authorized for the private tunnel;
+- the `loopkey.exe` release artifact.
+
+The DevBox additionally needs Azure Developer CLI and the profile wrapper:
+
+```text
+%USERPROFILE%\.azd-profiles\azd-corp.cmd
+%USERPROFILE%\.azd-profiles\azd-green.cmd
+```
+
+## Usage
+
+Start a request on the DevBox:
+
+```powershell
+loopkey request --profile corp
+```
+
+For Green, provide the tenant explicitly or set `LOOPKEY_GREEN_TENANT_ID`:
+
+```powershell
+loopkey request --profile green --tenant-id <green-tenant-id>
+```
+
+LoopKey creates a private tunnel, starts `azd` with a fixed loopback callback,
+and prints one laptop command:
+
+```powershell
+loopkey connect <tunnel-id> <request-id> --metadata-port 8401
+```
+
+Run that command on the laptop. It connects the tunnel, fetches the one-time
+request, opens the default browser, waits for DevBox verification, and exits.
+
+Use `loopkey --help` for port, expiration, tunnel ID, and wrapper overrides.
+
+## Security model
+
+- Tunnels are private by default; LoopKey never enables anonymous access.
+- Requests expire after 10 minutes by default.
+- A request uses random 128-bit request identifiers and a dedicated temporary
+  tunnel.
+- The Entra authorization URL is available only through the authenticated
+  tunnel and includes a PKCE challenge, not the verifier.
+- OAuth tokens and the PKCE verifier remain inside the DevBox `azd` process.
+- LoopKey validates the HTTPS Entra host, exact localhost callback port,
+  `state`, and S256 PKCE parameters before exposing a request.
+- Success is reported only after `azd auth login --check-status` verifies the
+  selected profile.
+- The request server binds only to DevBox loopback.
+- The tunnel, request files, callback listener, and helper processes are
+  removed on success, failure, cancellation, or expiration.
+
+The current prototype does not yet refresh Brix's Green token cache. A Green
+integration must perform that separate refresh after `azd` verification.
+
+## Build and test
+
+```powershell
+dotnet test .\LoopKey.slnx
+dotnet publish .\src\LoopKey\LoopKey.csproj -c Release -o .\artifacts\win-x64
+```
+
+The project targets .NET 10 and publishes a self-contained Windows x64
+executable.
+
+## Status
+
+The repository contains the initial end-to-end CLI implementation. It still
+needs validation against a fresh Corp and Green login before a first release.

@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/LoopKey/LoopKey.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/LoopKey.Tests/LoopKey.Tests.csproj" />
+  </Folder>
+</Solution>
