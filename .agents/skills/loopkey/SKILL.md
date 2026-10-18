@@ -1,6 +1,6 @@
 ---
 name: loopkey
-description: Install or use LoopKey to forward a browser-based OAuth localhost redirect from a Windows client to a configured authentication command on a remote Windows host.
+description: Use an already configured LoopKey profile to forward browser-based OAuth from a Windows client to a remote Windows host.
 license: MIT
 compatibility: Requires the LoopKey repository workflow and Windows prerequisites described by the canonical skill.
 metadata:

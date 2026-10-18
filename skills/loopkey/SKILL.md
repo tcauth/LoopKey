@@ -1,40 +1,24 @@
 ---
 name: loopkey
-description: Install or use LoopKey to forward a browser-based OAuth localhost redirect from a Windows client to a configured authentication command on a remote Windows host. Use for LoopKey setup, interactive login, MFA, Conditional Access, or a loopback callback that must be completed in another machine's browser.
+description: Use an already configured LoopKey profile to complete browser-based OAuth, MFA, or Conditional Access on a Windows client while the authentication command runs on a remote Windows host.
 license: MIT
-compatibility: Requires Windows, loopkey.exe, Microsoft Dev Tunnels CLI, and a trusted LoopKey profile on the host. The client needs loopkey.exe and Dev Tunnels CLI.
+compatibility: Requires Windows, loopkey.exe, Microsoft Dev Tunnels CLI, matching private-tunnel identities, and a validated LoopKey profile on the host.
 metadata:
   author: tcauth
-  version: "0.3.0-alpha.1"
+  version: "0.3.0-alpha.2"
 ---
 
-# LoopKey remote authentication
+# Use LoopKey
 
 Use LoopKey to forward an OAuth localhost callback while keeping the
-authentication command and its credential state on the host. Treat every
-profile as trusted executable configuration.
-
-## Setup requests
-
-When the user explicitly asks to install or configure LoopKey:
-
-1. Work from a trusted checkout of `https://github.com/tcauth/LoopKey`.
-2. Read `docs/setup.md` and inspect `scripts/setup.ps1`.
-3. Run setup for the current machine:
-
-   ```powershell
-   .\scripts\setup.ps1 -Role <Client|Host> `
-     -Agent <github-copilot|codex|claude-code> `
-     [-ProfileConfig <reviewed-json-path>]
-   ```
-
-4. A host requires a user-owned profile describing the authentication
-   application. Never invent tenants, commands, hosts, success markers, or
-   post-auth behavior.
-5. Complete every postcondition in `docs/setup.md`.
+authentication command and credential state on the host. This skill is only
+for daily use of an existing, validated profile. For installation, profile
+creation, profile repair, or machine onboarding, use the `loopkey-setup` skill.
 
 ## Security invariants
 
+- Never install software, create a profile, or edit profile configuration in
+  this skill.
 - Never enable anonymous Dev Tunnel access.
 - Never print, copy, request, or log tokens, authorization codes, one-time
   credentials, or PKCE verifiers.
@@ -50,8 +34,8 @@ When the user explicitly asks to install or configure LoopKey:
 
 ## Host procedure
 
-1. Determine the intended profile name from the user or existing environment.
-   Do not infer application-specific values.
+1. Determine the intended existing profile name from the user or configured
+   environment. Do not infer application-specific values.
 2. Resolve LoopKey and validate the complete configuration:
 
    ```powershell
@@ -114,9 +98,10 @@ for host verification, and exit automatically.
 ## Failure handling
 
 - **Missing LoopKey or Dev Tunnels CLI during authentication:** report the
-  exact prerequisite and stop. Install only after an explicit setup request.
-- **Missing or invalid profile:** stop and request a reviewed configuration;
-  never synthesize application-specific values.
+  exact prerequisite and stop. Use `loopkey-setup` only after an explicit
+  setup request.
+- **Missing or invalid profile:** stop and use `loopkey-setup`; never
+  synthesize or repair application-specific values in this skill.
 - **Dev Tunnel authentication failure:** report the exact error; never enable
   anonymous access.
 - **Port in use:** retry only with two known-free ports using

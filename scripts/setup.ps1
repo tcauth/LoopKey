@@ -7,7 +7,7 @@ param(
     [ValidateSet("github-copilot", "codex", "claude-code", "all", "none")]
     [string]$Agent = "all",
 
-    [string]$Version = "v0.3.0-alpha.1",
+    [string]$Version = "v0.3.0-alpha.2",
 
     [string]$SkillRef,
 
@@ -130,7 +130,7 @@ function Add-UserPath {
     }
 }
 
-function Install-AgentSkill {
+function Install-AgentSkills {
     param(
         [Parameter(Mandatory = $true)]
         [string]$ResolvedVersion
@@ -150,15 +150,17 @@ function Install-AgentSkill {
     $reference = if ([string]::IsNullOrWhiteSpace($SkillRef)) { $ResolvedVersion } else { $SkillRef }
 
     foreach ($target in $agents) {
-        Invoke-Checked "gh" @(
-            "skill", "install",
-            "tcauth/LoopKey",
-            "loopkey",
-            "--agent", $target,
-            "--scope", "user",
-            "--pin", $reference,
-            "--force"
-        )
+        foreach ($skill in @("loopkey-setup", "loopkey")) {
+            Invoke-Checked "gh" @(
+                "skill", "install",
+                "tcauth/LoopKey",
+                $skill,
+                "--agent", $target,
+                "--scope", "user",
+                "--pin", $reference,
+                "--force"
+            )
+        }
     }
 }
 
@@ -221,12 +223,12 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 Ensure-Command "devtunnel" "Microsoft.devtunnel"
 
 if ($Version -notmatch "^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$") {
-    throw "Version must be a release tag such as v0.3.0-alpha.1."
+    throw "Version must be a release tag such as v0.3.0-alpha.2."
 }
 $resolvedVersion = $Version
 Install-LoopKey $resolvedVersion
 Add-UserPath
-Install-AgentSkill $resolvedVersion
+Install-AgentSkills $resolvedVersion
 Ensure-DevTunnelLogin
 $devTunnelIdentity = Save-DevTunnelIdentity
 

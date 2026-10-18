@@ -14,8 +14,10 @@ downloaded executable against a release SHA-256 asset.
 Give an agent with terminal access this prompt:
 
 > Set up LoopKey from https://github.com/tcauth/LoopKey on this Windows
-> machine. Follow `docs/setup.md`, install the user-scoped skill for your agent
-> host, complete Dev Tunnel login, and verify the documented postconditions.
+> machine. Follow `docs/setup.md`, install the user-scoped `loopkey-setup` and
+> `loopkey` skills for your agent host, build a validated profile when this is
+> the authentication host, complete Dev Tunnel login, and verify the documented
+> postconditions.
 
 The agent should inspect `scripts/setup.ps1` before executing it.
 
@@ -24,7 +26,7 @@ For a machine without Git or GitHub CLI, download the versioned setup script:
 ```powershell
 $setup = Join-Path $env:TEMP "loopkey-setup.ps1"
 Invoke-WebRequest `
-  https://raw.githubusercontent.com/tcauth/LoopKey/v0.3.0-alpha.1/scripts/setup.ps1 `
+  https://raw.githubusercontent.com/tcauth/LoopKey/v0.3.0-alpha.2/scripts/setup.ps1 `
   -OutFile $setup
 Get-Content $setup
 & $setup -Role Client -Agent github-copilot
@@ -45,7 +47,9 @@ Use `codex`, `claude-code`, or `all` for `-Agent`. The default is `all`.
 ## Host
 
 Create and review a profile configuration for the authentication application.
-Start from `examples/profiles.example.json`, then run:
+The `loopkey-setup` skill can discover the local authentication commands,
+construct and merge the profile, and validate it before installation. Start
+from `examples/profiles.example.json`, then run:
 
 ```powershell
 .\scripts\setup.ps1 -Role Host -Agent github-copilot `
@@ -59,6 +63,27 @@ LoopKey does not install or configure the authentication application itself.
 Host setup uses Dev Tunnel device-code authentication so no browser must open
 on the remote host. This authenticates Dev Tunnels only; it is unrelated to
 the authentication command later launched by a profile.
+
+## Agent-built profiles
+
+The setup skill may automate profile construction, but it must derive every
+application-specific value from the user, installed CLI help, reviewed local
+wrappers, trusted documentation, or a controlled local probe. It must not guess
+commands, tenants, authorization hosts, verification markers, or post-auth
+behavior.
+
+When a local probe is needed, the agent sets a temporary `BROWSER` helper,
+starts the intended login command with a throwaway callback port, parses the
+authorization URL locally, and immediately deletes the raw URL and helper. The
+probe may retain only structural information: the exact HTTPS host, redirect
+query-key name, loopback URI shape, query-key names, and documented fixed
+values. Ephemeral values such as state, nonce, authorization codes, and code
+challenges must never be printed, returned, or stored in the profile.
+
+The agent writes a separate candidate JSON file, preserves unrelated existing
+profiles, and runs `loopkey config validate --config <candidate>` before
+installing it. Replacing an existing case-insensitive profile name requires
+explicit user approval.
 
 ## Dev Tunnel identity
 
@@ -117,6 +142,9 @@ devtunnel user show
 gh skill list
 ```
 
+`gh skill list` must show both `loopkey-setup` and `loopkey` for the selected
+agent host.
+
 Host:
 
 ```powershell
@@ -131,8 +159,8 @@ Start a new terminal after first setup if `loopkey` is not yet resolved from
 ## Non-default options
 
 - `-Version <tag>` selects a release other than the script's pinned default.
-- `-Agent none` skips agent skill installation.
-- `-SkillRef <ref>` installs the skill from a different tag or commit.
+- `-Agent none` skips both agent skill installations.
+- `-SkillRef <ref>` installs both skills from a different tag or commit.
 - `-ProfileConfig <path>` installs a reviewed host profile file.
 - `-ConfigurationPath <path>` changes the installed profile path.
 - `-SkipDevTunnelLogin` installs files without starting Dev Tunnel login.

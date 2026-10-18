@@ -41,8 +41,10 @@ An agent with terminal access can complete setup from the public repository.
 Give it this prompt:
 
 > Set up LoopKey from https://github.com/tcauth/LoopKey on this Windows
-> machine. Follow `docs/setup.md`, install the user-scoped skill for your agent
-> host, complete Dev Tunnel login, and verify the documented postconditions.
+> machine. Follow `docs/setup.md`, install the user-scoped `loopkey-setup` and
+> `loopkey` skills for your agent host, build a validated profile when this is
+> the authentication host, complete Dev Tunnel login, and verify the documented
+> postconditions.
 
 Or run setup directly from a checkout.
 
@@ -61,8 +63,10 @@ Host, with a reviewed profile configuration:
 
 Use `codex`, `claude-code`, or `all` for `-Agent`. Setup installs the
 checksum-verified release binary, configures user `PATH`, installs missing CLI
-prerequisites, authenticates Dev Tunnels, installs the canonical skill at user
-scope, and optionally installs the supplied profile configuration.
+prerequisites, authenticates Dev Tunnels, installs both canonical skills at
+user scope, and optionally installs the supplied profile configuration. It
+installs `loopkey-setup` for onboarding and profile construction, and `loopkey`
+for daily authentication.
 
 See [`docs/setup.md`](docs/setup.md) for the versioned bootstrap command,
 matching Dev Tunnel identity checks, profile schema, and verification steps.
@@ -78,6 +82,13 @@ The default configuration path is:
 Start from [`examples/profiles.example.json`](examples/profiles.example.json).
 The example names no real provider or account and must be adapted to the
 authentication CLI being forwarded.
+
+The `loopkey-setup` skill can construct this file with the user. It discovers
+local commands, reads trusted CLI help or documentation, optionally performs a
+controlled local authorization-URL structure probe, merges the profile without
+discarding existing entries, and validates the candidate before installation.
+It must never guess provider-specific values or persist authorization-request
+secrets.
 
 Validate configuration without starting authentication:
 
@@ -127,24 +138,27 @@ Use `loopkey --help` for port, expiration, tunnel ID, and config overrides.
 - The tunnel, request files, callback listener, and child processes are
   removed on success, failure, cancellation, or expiration.
 
-## Agent skill
+## Agent skills
 
-The complete, provider-neutral workflow is maintained once in:
+The two provider-neutral workflows are maintained independently:
 
 ```text
-skills/loopkey/SKILL.md
+skills/loopkey-setup/SKILL.md  # installation and profile construction
+skills/loopkey/SKILL.md        # daily authentication
 ```
 
-Thin discovery adapters reference it:
+Each agent host has thin discovery adapters for both skills:
 
 ```text
-.github/skills/loopkey/SKILL.md  # GitHub Copilot
-.agents/skills/loopkey/SKILL.md  # Codex
-.claude/skills/loopkey/SKILL.md  # Claude Code
+.github/skills/{loopkey-setup,loopkey}/SKILL.md  # GitHub Copilot
+.agents/skills/{loopkey-setup,loopkey}/SKILL.md  # Codex
+.claude/skills/{loopkey-setup,loopkey}/SKILL.md  # Claude Code
 ```
 
 Normal installation uses `gh skill install` through `scripts/setup.ps1`, which
-copies the canonical skill into each selected agent's user-scoped directory.
+copies both canonical skills into each selected agent's user-scoped directory.
+The use skill does not install software or modify profiles; it hands setup and
+repair requests to the setup skill.
 
 ## Build and test
 
@@ -158,6 +172,6 @@ executable.
 
 ## Status
 
-LoopKey `v0.3.0-alpha.1` is an experimental alpha release. The tunnel and
+LoopKey `v0.3.0-alpha.2` is an experimental alpha release. The tunnel and
 loopback mechanism has been validated end to end; authentication applications
 are supplied entirely through user-owned profile configuration.
