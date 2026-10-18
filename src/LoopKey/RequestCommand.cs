@@ -173,8 +173,10 @@ internal static class RequestCommand
         IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string?> environment)
     {
-        var command = BuildCmdCommand(azdPath, arguments);
-        var process = ProcessRunner.Start("cmd.exe", ["/d", "/s", "/c", command], environment);
+        var process = ProcessRunner.StartRaw(
+            "cmd.exe",
+            BuildCmdArguments(azdPath, arguments),
+            environment);
         process.Start();
         return process;
     }
@@ -184,14 +186,14 @@ internal static class RequestCommand
         IReadOnlyList<string> arguments,
         IReadOnlyDictionary<string, string?>? environment,
         CancellationToken cancellationToken) =>
-        ProcessRunner.RunAsync(
+        ProcessRunner.RunRawAsync(
             "cmd.exe",
-            ["/d", "/s", "/c", BuildCmdCommand(azdPath, arguments)],
+            BuildCmdArguments(azdPath, arguments),
             environment,
             cancellationToken);
 
-    private static string BuildCmdCommand(string executable, IEnumerable<string> arguments) =>
-        $"call \"{executable}\" {string.Join(' ', arguments.Select(QuoteCmdArgument))}";
+    internal static string BuildCmdArguments(string executable, IEnumerable<string> arguments) =>
+        $"/d /s /c \"\"{executable}\" {string.Join(' ', arguments.Select(QuoteCmdArgument))}\"";
 
     private static string QuoteCmdArgument(string argument) =>
         argument.Any(char.IsWhiteSpace) ? $"\"{argument.Replace("\"", "\"\"", StringComparison.Ordinal)}\"" : argument;
