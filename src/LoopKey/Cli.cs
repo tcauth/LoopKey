@@ -6,29 +6,27 @@ namespace LoopKey;
 internal static class Cli
 {
     private const string Usage = """
-        LoopKey - one-command, tunnel-backed browser authentication for remote DevBoxes
+        LoopKey - tunnel-backed browser authentication for remote Windows hosts
 
         Usage:
-          loopkey request --profile <corp|green> [options]
+          loopkey request --profile <name> [options]
           loopkey connect <tunnel-id> <request-id> [options]
+          loopkey config validate [--config <path>]
           loopkey --version
 
         Request options:
-          --tenant-id <id>          Entra tenant. Corp defaults to the Microsoft tenant.
+          --config <path>           Profile configuration (default: %USERPROFILE%\.loopkey\profiles.json).
           --callback-port <port>    OAuth loopback callback port (default: 8400).
           --metadata-port <port>    Private request metadata port (default: 8401).
           --expires-minutes <n>     Request lifetime (default: 10).
           --tunnel-id <id>          Dev Tunnel ID (default: generated).
-          --azd <path>              azd wrapper path (default: profile-specific wrapper).
-          --green-post-auth-script <path>
-                                    Optional .ps1, .py, .cmd, .bat, or .exe hook.
 
         Connect options:
           --metadata-port <port>    Private request metadata port (default: 8401).
           --no-browser              Validate the flow without opening a browser.
 
         Examples:
-          loopkey request --profile corp
+          loopkey request --profile work
           loopkey connect loopkey-jbtem-a1b2c3d4 7f3a9c2e --metadata-port 8401
         """;
 
@@ -63,6 +61,7 @@ internal static class Cli
             {
                 "request" => await RequestCommand.RunAsync(ParseRequestOptions(args[1..]), cancellation.Token),
                 "connect" => await ConnectCommand.RunAsync(ParseConnectOptions(args[1..]), cancellation.Token),
+                "config" => RunConfig(args[1..]),
                 _ => throw new CliException($"Unknown command '{args[0]}'.\n\n{Usage}"),
             };
         }
@@ -86,35 +85,20 @@ internal static class Cli
     internal static RequestOptions ParseRequestOptions(string[] args)
     {
         var values = ParseNamedArguments(args);
-        var profile = GetRequired(values, "--profile").ToLowerInvariant();
-        if (profile is not ("corp" or "green"))
-        {
-            throw new CliException("--profile must be 'corp' or 'green'.");
-        }
-
-        var tenantId = GetOptional(values, "--tenant-id")
-            ?? (profile == "corp" ? RequestOptions.MicrosoftTenantId : null)
-            ?? Environment.GetEnvironmentVariable("LOOPKEY_GREEN_TENANT_ID")
-            ?? throw new CliException("--tenant-id is required for the green profile.");
-
+        var profileName = GetRequired(values, "--profile");
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        var defaultAzd = Path.Combine(home, ".azd-profiles", $"azd-{profile}.cmd");
-        var greenPostAuthScript = GetOptional(values, "--green-post-auth-script")
-            ?? Environment.GetEnvironmentVariable("LOOPKEY_GREEN_POST_AUTH_SCRIPT");
-        if (profile != "green" && greenPostAuthScript is not null)
-        {
-            throw new CliException("--green-post-auth-script can be used only with the green profile.");
-        }
+        var configPath = GetOptional(values, "--config")
+            ?? Environment.GetEnvironmentVariable("LOOPKEY_CONFIG")
+            ?? Path.Combine(home, ".loopkey", "profiles.json");
+        var profile = AuthConfiguration.Load(configPath, profileName);
 
         return new RequestOptions(
             profile,
-            tenantId,
+            configPath,
             ParsePort(values, "--callback-port", 8400),
             ParsePort(values, "--metadata-port", 8401),
             ParsePositiveInt(values, "--expires-minutes", 10),
-            GetOptional(values, "--tunnel-id"),
-            GetOptional(values, "--azd") ?? defaultAzd,
-            greenPostAuthScript);
+            GetOptional(values, "--tunnel-id"));
     }
 
     internal static ConnectOptions ParseConnectOptions(string[] args)
@@ -154,6 +138,28 @@ internal static class Cli
             positional[1],
             ParsePort(named, "--metadata-port", 8401),
             named.ContainsKey("--no-browser"));
+    }
+
+    private static int RunConfig(string[] args)
+    {
+        if (args.Length == 0 || !args[0].Equals("validate", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new CliException("config requires the 'validate' command.");
+        }
+
+        var values = ParseNamedArguments(args[1..]);
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        var configPath = GetOptional(values, "--config")
+            ?? Environment.GetEnvironmentVariable("LOOPKEY_CONFIG")
+            ?? Path.Combine(home, ".loopkey", "profiles.json");
+        var profiles = AuthConfiguration.LoadAll(configPath);
+        foreach (var profile in profiles)
+        {
+            AuthConfiguration.ValidateCommandAvailability(profile);
+        }
+
+        Console.WriteLine($"Configuration valid. Profiles: {string.Join(", ", profiles.Select(p => p.Name))}");
+        return 0;
     }
 
     private static Dictionary<string, string?> ParseNamedArguments(string[] args)
@@ -230,17 +236,12 @@ internal static class Cli
 internal sealed class CliException(string message) : Exception(message);
 
 internal sealed record RequestOptions(
-    string Profile,
-    string TenantId,
+    AuthProfile Profile,
+    string ConfigPath,
     int CallbackPort,
     int MetadataPort,
     int ExpiresMinutes,
-    string? TunnelId,
-    string AzdPath,
-    string? GreenPostAuthScript)
-{
-    public const string MicrosoftTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47";
-}
+    string? TunnelId);
 
 internal sealed record ConnectOptions(
     string TunnelId,

@@ -3,68 +3,48 @@ namespace LoopKey.Tests;
 public class CliTests
 {
     [Fact]
-    public void CorpRequestUsesMicrosoftTenantAndDefaultPorts()
+    public void RequestLoadsNamedProfileAndDefaultPorts()
     {
-        var options = Cli.ParseRequestOptions(["--profile", "corp"]);
+        var config = WriteConfiguration();
+        try
+        {
+            var options = Cli.ParseRequestOptions(
+                ["--profile", "work", "--config", config]);
 
-        Assert.Equal("corp", options.Profile);
-        Assert.Equal(RequestOptions.MicrosoftTenantId, options.TenantId);
-        Assert.Equal(8400, options.CallbackPort);
-        Assert.Equal(8401, options.MetadataPort);
-        Assert.EndsWith(
-            Path.Combine(".azd-profiles", "azd-corp.cmd"),
-            options.AzdPath,
-            StringComparison.OrdinalIgnoreCase);
-        Assert.Null(options.GreenPostAuthScript);
-    }
-
-    [Fact]
-    public void GreenRequestAcceptsPostAuthScript()
-    {
-        var options = Cli.ParseRequestOptions(
-            [
-                "--profile", "green",
-                "--tenant-id", "green-tenant",
-                "--green-post-auth-script", @"C:\tools\refresh.py",
-            ]);
-
-        Assert.Equal(@"C:\tools\refresh.py", options.GreenPostAuthScript);
-    }
-
-    [Fact]
-    public void CorpRequestRejectsGreenPostAuthScript()
-    {
-        var exception = Assert.Throws<CliException>(
-            () => Cli.ParseRequestOptions(
-                [
-                    "--profile", "corp",
-                    "--green-post-auth-script", @"C:\tools\refresh.py",
-                ]));
-
-        Assert.Contains("only with the green profile", exception.Message, StringComparison.Ordinal);
+            Assert.Equal("work", options.Profile.Name);
+            Assert.Equal("fake-login.cmd", options.Profile.Login.FileName);
+            Assert.Equal("verified", options.Profile.SuccessOutputContains);
+            Assert.Equal("post-auth.exe", options.Profile.PostAuth?.FileName);
+            Assert.Equal(8400, options.CallbackPort);
+            Assert.Equal(8401, options.MetadataPort);
+        }
+        finally
+        {
+            File.Delete(config);
+        }
     }
 
     [Fact]
     public void ReportsPackageVersion()
     {
-        Assert.Equal("0.2.0-alpha.2", Cli.Version);
+        Assert.Equal("0.3.0-alpha.1", Cli.Version);
     }
 
     [Fact]
-    public void GreenRequestRequiresTenant()
+    public void RequestRejectsUnknownProfile()
     {
-        var previous = Environment.GetEnvironmentVariable("LOOPKEY_GREEN_TENANT_ID");
-        Environment.SetEnvironmentVariable("LOOPKEY_GREEN_TENANT_ID", null);
+        var config = WriteConfiguration();
         try
         {
             var exception = Assert.Throws<CliException>(
-                () => Cli.ParseRequestOptions(["--profile", "green"]));
+                () => Cli.ParseRequestOptions(
+                    ["--profile", "missing", "--config", config]));
 
-            Assert.Contains("--tenant-id", exception.Message, StringComparison.Ordinal);
+            Assert.Contains("was not found", exception.Message, StringComparison.Ordinal);
         }
         finally
         {
-            Environment.SetEnvironmentVariable("LOOPKEY_GREEN_TENANT_ID", previous);
+            File.Delete(config);
         }
     }
 
@@ -78,5 +58,45 @@ public class CliTests
         Assert.Equal("request-1234", options.RequestId);
         Assert.Equal(9001, options.MetadataPort);
         Assert.True(options.NoBrowser);
+    }
+
+    private static string WriteConfiguration()
+    {
+        var path = Path.Combine(Path.GetTempPath(), $"loopkey-config-{Guid.NewGuid():N}.json");
+        File.WriteAllText(
+            path,
+            """
+            {
+              "profiles": {
+                "work": {
+                  "login": {
+                    "command": "fake-login.cmd",
+                    "arguments": ["login", "--port", "{callbackPort}"],
+                    "environment": {
+                      "INTERACTIVE": "true"
+                    }
+                  },
+                  "verification": {
+                    "command": "fake-check.exe",
+                    "arguments": ["check"],
+                    "successOutputContains": "verified"
+                  },
+                  "authorization": {
+                    "allowedHosts": ["auth.example.com"],
+                    "redirectUriParameter": "redirect_uri",
+                    "requiredQueryParameters": ["state"],
+                    "requiredQueryValues": {
+                      "code_challenge_method": "S256"
+                    }
+                  },
+                  "postAuth": {
+                    "command": "post-auth.exe",
+                    "arguments": []
+                  }
+                }
+              }
+            }
+            """);
+        return path;
     }
 }

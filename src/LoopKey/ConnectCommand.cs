@@ -40,7 +40,7 @@ internal static class ConnectCommand
             Console.WriteLine("Browser launch suppressed by --no-browser.");
         }
 
-        Console.WriteLine("Waiting for the DevBox to verify authentication...");
+        Console.WriteLine("Waiting for the host to verify authentication...");
         var status = await WaitForStatusAsync(client, options.RequestId, manifest.ExpiresAt, tunnel, cancellationToken);
         Console.WriteLine(status.Message);
         return status.State == "succeeded" ? 0 : 1;

@@ -10,11 +10,7 @@ internal static class RequestCommand
     public static async Task<int> RunAsync(RequestOptions options, CancellationToken cancellationToken)
     {
         EnsureWindows();
-        EnsureFileExists(options.AzdPath, "azd wrapper");
-        if (options.GreenPostAuthScript is not null)
-        {
-            EnsureFileExists(options.GreenPostAuthScript, "Green post-auth script");
-        }
+        AuthConfiguration.ValidateCommandAvailability(options.Profile);
         EnsurePortAvailable(options.CallbackPort);
         EnsurePortAvailable(options.MetadataPort);
 
@@ -38,7 +34,7 @@ internal static class RequestCommand
             cancellationToken);
 
         ManagedProcess? tunnelHost = null;
-        ManagedProcess? azdLogin = null;
+        ManagedProcess? loginProcess = null;
         RequestServer? server = null;
         var tunnelCreated = false;
 
@@ -49,7 +45,11 @@ internal static class RequestCommand
         {
             await RunRequiredAsync(
                 "devtunnel",
-                ["create", tunnelId, "--expiration", "1h", "-d", $"LoopKey {options.Profile} auth request"],
+                [
+                    "create", tunnelId,
+                    "--expiration", "1h",
+                    "-d", $"LoopKey {options.Profile.Name} auth request",
+                ],
                 expires.Token);
             tunnelCreated = true;
             await RunRequiredAsync(
@@ -68,34 +68,31 @@ internal static class RequestCommand
                 TimeSpan.FromSeconds(30),
                 expires.Token);
 
-            var environment = new Dictionary<string, string?>
+            var environment = new Dictionary<string, string?>(
+                options.Profile.Login.Environment,
+                StringComparer.OrdinalIgnoreCase)
             {
                 ["BROWSER"] = browserShim,
-                ["AZD_NON_INTERACTIVE"] = "false",
                 [BrowserCapture.CapturePathVariable] = capturePath,
+                [BrowserCapture.AllowedHostsVariable] =
+                    string.Join(';', options.Profile.Authorization.AllowedHosts),
             };
-            azdLogin = StartAzd(
-                options.AzdPath,
-                [
-                    "auth",
-                    "login",
-                    "--tenant-id",
-                    options.TenantId,
-                    "--redirect-port",
-                    options.CallbackPort.ToString(),
-                ],
-                environment);
+            var login = options.Profile.Login.WithCallbackPort(options.CallbackPort);
+            loginProcess = StartConfiguredCommand(login, environment);
 
             var authorizationUrl = await WaitForCaptureAsync(
                 capturePath,
-                azdLogin,
+                loginProcess,
                 TimeSpan.FromSeconds(30),
                 expires.Token);
-            BrowserCapture.ValidateAuthorizationUrl(authorizationUrl, options.CallbackPort);
+            BrowserCapture.ValidateAuthorizationUrl(
+                authorizationUrl,
+                options.CallbackPort,
+                options.Profile.Authorization);
 
             var manifest = new AuthManifest(
                 requestId,
-                options.Profile,
+                options.Profile.Name,
                 authorizationUrl,
                 options.CallbackPort,
                 expiresAt);
@@ -105,54 +102,62 @@ internal static class RequestCommand
 
             Console.WriteLine("Authentication request ready.");
             Console.WriteLine();
-            Console.WriteLine("Run this once on the laptop:");
+            Console.WriteLine("Run this once on the client:");
             Console.WriteLine(
                 $"  loopkey connect {tunnelId} {requestId} --metadata-port {options.MetadataPort}");
             Console.WriteLine();
             Console.WriteLine($"Expires: {expiresAt:O}");
             Console.WriteLine("Waiting for browser authentication...");
 
-            var exitCode = await azdLogin.WaitForExitAsync(expires.Token);
+            var exitCode = await loginProcess.WaitForExitAsync(expires.Token);
             if (exitCode != 0)
             {
-                state.SetStatus("failed", $"azd login failed with exit code {exitCode}.");
+                state.SetStatus("failed", $"The login command failed with exit code {exitCode}.");
                 await WaitForStatusObservationAsync(state, cancellationToken);
-                throw new CliException($"azd login failed.\n{azdLogin.Output.Trim()}");
+                throw new CliException(
+                    $"Configured login command failed.\n{loginProcess.Output.Trim()}");
             }
 
-            var check = await RunAzdAsync(
-                options.AzdPath,
-                ["auth", "login", "--check-status", "--tenant-id", options.TenantId],
-                environment: null,
+            var check = await RunConfiguredCommandAsync(
+                options.Profile.Verification,
+                environmentOverrides: null,
                 cancellationToken);
             if (check.ExitCode != 0
-                || !check.CombinedOutput.Contains("Logged in to Azure as", StringComparison.OrdinalIgnoreCase))
+                || !check.CombinedOutput.Contains(
+                    options.Profile.SuccessOutputContains,
+                    StringComparison.Ordinal))
             {
-                state.SetStatus("failed", "azd completed but the profile status check failed.");
+                state.SetStatus("failed", "The configured authentication verification failed.");
                 await WaitForStatusObservationAsync(state, cancellationToken);
-                throw new CliException($"azd profile verification failed.\n{check.CombinedOutput}");
+                throw new CliException(
+                    $"Configured authentication verification failed.\n{check.CombinedOutput}");
             }
 
-            if (options.GreenPostAuthScript is not null)
+            if (options.Profile.PostAuth is not null)
             {
-                var postAuth = await RunPostAuthScriptAsync(
-                    options.GreenPostAuthScript,
+                var postAuth = await RunConfiguredCommandAsync(
+                    options.Profile.PostAuth,
+                    environmentOverrides: null,
                     cancellationToken);
                 if (postAuth.ExitCode != 0)
                 {
-                    state.SetStatus("failed", "Green authentication succeeded, but the post-auth script failed.");
+                    state.SetStatus(
+                        "failed",
+                        "Authentication succeeded, but the configured post-auth command failed.");
                     await WaitForStatusObservationAsync(state, cancellationToken);
                     throw new CliException(
-                        $"Green post-auth script failed with exit code {postAuth.ExitCode}.\n"
+                        $"Post-auth command failed with exit code {postAuth.ExitCode}.\n"
                         + postAuth.CombinedOutput);
                 }
 
-                Console.WriteLine("Green post-auth script completed successfully.");
+                Console.WriteLine("Post-auth command completed successfully.");
             }
 
-            state.SetStatus("succeeded", $"Authenticated {options.Profile} profile on the DevBox.");
+            state.SetStatus(
+                "succeeded",
+                $"Authenticated profile '{options.Profile.Name}' on the host.");
             await WaitForStatusObservationAsync(state, cancellationToken);
-            Console.WriteLine($"Authenticated {options.Profile} profile successfully.");
+            Console.WriteLine($"Authenticated profile '{options.Profile.Name}' successfully.");
             return 0;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
@@ -166,9 +171,9 @@ internal static class RequestCommand
                 await server.DisposeAsync();
             }
 
-            if (azdLogin is not null)
+            if (loginProcess is not null)
             {
-                await azdLogin.DisposeAsync();
+                await loginProcess.DisposeAsync();
             }
 
             if (tunnelHost is not null)
@@ -189,29 +194,39 @@ internal static class RequestCommand
         }
     }
 
-    private static ManagedProcess StartAzd(
-        string azdPath,
-        IReadOnlyList<string> arguments,
-        IReadOnlyDictionary<string, string?> environment)
+    private static ManagedProcess StartConfiguredCommand(
+        ConfiguredCommand command,
+        IReadOnlyDictionary<string, string?>? environmentOverrides)
     {
-        var process = ProcessRunner.StartRaw(
-            "cmd.exe",
-            BuildCmdArguments(azdPath, arguments),
-            environment);
+        var environment = MergeEnvironment(command.Environment, environmentOverrides);
+        var process = IsCommandScript(command.FileName)
+            ? ProcessRunner.StartRaw(
+                "cmd.exe",
+                BuildCmdArguments(command.FileName, command.Arguments),
+                environment)
+            : ProcessRunner.Start(command.FileName, command.Arguments, environment);
         process.Start();
         return process;
     }
 
-    private static Task<ProcessResult> RunAzdAsync(
-        string azdPath,
-        IReadOnlyList<string> arguments,
-        IReadOnlyDictionary<string, string?>? environment,
-        CancellationToken cancellationToken) =>
-        ProcessRunner.RunRawAsync(
-            "cmd.exe",
-            BuildCmdArguments(azdPath, arguments),
-            environment,
-            cancellationToken);
+    internal static Task<ProcessResult> RunConfiguredCommandAsync(
+        ConfiguredCommand command,
+        IReadOnlyDictionary<string, string?>? environmentOverrides,
+        CancellationToken cancellationToken)
+    {
+        var environment = MergeEnvironment(command.Environment, environmentOverrides);
+        return IsCommandScript(command.FileName)
+            ? ProcessRunner.RunRawAsync(
+                "cmd.exe",
+                BuildCmdArguments(command.FileName, command.Arguments),
+                environment,
+                cancellationToken)
+            : ProcessRunner.RunAsync(
+                command.FileName,
+                command.Arguments,
+                environment,
+                cancellationToken);
+    }
 
     internal static string BuildCmdArguments(string executable, IEnumerable<string> arguments) =>
         $"/d /s /c \"\"{executable}\" {string.Join(' ', arguments.Select(QuoteCmdArgument))}\"";
@@ -221,7 +236,7 @@ internal static class RequestCommand
 
     private static async Task<string> WaitForCaptureAsync(
         string path,
-        ManagedProcess azdLogin,
+        ManagedProcess loginProcess,
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
@@ -238,15 +253,18 @@ internal static class RequestCommand
                 }
             }
 
-            if (azdLogin.HasExited)
+            if (loginProcess.HasExited)
             {
-                throw new CliException($"azd exited before producing an authorization URL.\n{azdLogin.Output.Trim()}");
+                throw new CliException(
+                    "The login command exited before producing an authorization URL.\n"
+                    + loginProcess.Output.Trim());
             }
 
             await Task.Delay(100, timeoutSource.Token);
         }
 
-        throw new CliException("azd did not produce an authorization URL before the timeout.");
+        throw new CliException(
+            "The login command did not produce an authorization URL before the timeout.");
     }
 
     private static async Task RunRequiredAsync(
@@ -261,37 +279,26 @@ internal static class RequestCommand
         }
     }
 
-    internal static Task<ProcessResult> RunPostAuthScriptAsync(
-        string path,
-        CancellationToken cancellationToken)
+    private static IReadOnlyDictionary<string, string?> MergeEnvironment(
+        IReadOnlyDictionary<string, string?> configured,
+        IReadOnlyDictionary<string, string?>? overrides)
     {
-        var extension = Path.GetExtension(path).ToLowerInvariant();
-        return extension switch
+        var environment = new Dictionary<string, string?>(
+            configured,
+            StringComparer.OrdinalIgnoreCase);
+        if (overrides is not null)
         {
-            ".ps1" => ProcessRunner.RunAsync(
-                "powershell.exe",
-                ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path],
-                environment: null,
-                cancellationToken),
-            ".py" => ProcessRunner.RunAsync(
-                "python",
-                [path],
-                environment: null,
-                cancellationToken),
-            ".cmd" or ".bat" => ProcessRunner.RunRawAsync(
-                "cmd.exe",
-                BuildCmdArguments(path, []),
-                environment: null,
-                cancellationToken),
-            ".exe" => ProcessRunner.RunAsync(
-                path,
-                [],
-                environment: null,
-                cancellationToken),
-            _ => throw new CliException(
-                "Green post-auth script must use a .ps1, .py, .cmd, .bat, or .exe extension."),
-        };
+            foreach (var pair in overrides)
+            {
+                environment[pair.Key] = pair.Value;
+            }
+        }
+
+        return environment;
     }
+
+    private static bool IsCommandScript(string path) =>
+        Path.GetExtension(path).ToLowerInvariant() is ".cmd" or ".bat";
 
     private static async Task WaitForStatusObservationAsync(
         RequestState state,
@@ -323,14 +330,6 @@ internal static class RequestCommand
         if (!OperatingSystem.IsWindows())
         {
             throw new CliException("The initial LoopKey implementation supports Windows only.");
-        }
-    }
-
-    private static void EnsureFileExists(string path, string description)
-    {
-        if (!File.Exists(path))
-        {
-            throw new CliException($"{description} not found: {path}");
         }
     }
 

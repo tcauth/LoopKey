@@ -12,7 +12,7 @@ public class RequestServerTests
         var port = FindFreePort();
         var manifest = new AuthManifest(
             "request-id",
-            "corp",
+            "work",
             "https://login.microsoftonline.com/tenant/oauth2/v2.0/authorize?state=state",
             8400,
             DateTimeOffset.UtcNow.AddMinutes(5));

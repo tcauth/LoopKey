@@ -7,6 +7,7 @@ namespace LoopKey;
 internal static class BrowserCapture
 {
     public const string CapturePathVariable = "LOOPKEY_CAPTURE_PATH";
+    public const string AllowedHostsVariable = "LOOPKEY_ALLOWED_AUTH_HOSTS";
 
     public static async Task<int> CaptureAsync()
     {
@@ -23,49 +24,86 @@ internal static class BrowserCapture
         }
 
         var commandLine = await ReadCommandLineAsync(parentId);
-        var authorizationUrl = ExtractAuthorizationUrl(commandLine);
+        var allowedHosts = (Environment.GetEnvironmentVariable(AllowedHostsVariable) ?? "")
+            .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (allowedHosts.Length == 0)
+        {
+            throw new CliException("No authorization hosts were configured for browser capture.");
+        }
+
+        var authorizationUrl = ExtractAuthorizationUrl(commandLine, allowedHosts);
         await File.WriteAllTextAsync(capturePath, authorizationUrl);
         return 0;
     }
 
-    internal static string ExtractAuthorizationUrl(string commandLine)
+    internal static string ExtractAuthorizationUrl(
+        string commandLine,
+        IReadOnlyCollection<string> allowedHosts)
     {
-        const string prefix = "https://login.microsoftonline.com/";
-        var start = commandLine.IndexOf(prefix, StringComparison.OrdinalIgnoreCase);
+        var start = allowedHosts
+            .Select(host => commandLine.IndexOf(
+                $"https://{host}",
+                StringComparison.OrdinalIgnoreCase))
+            .Where(index => index >= 0)
+            .DefaultIfEmpty(-1)
+            .Min();
         if (start < 0)
         {
-            throw new CliException("The browser launcher command did not contain an Entra authorization URL.");
+            throw new CliException(
+                "The browser launcher command did not contain an authorization URL for an allowed host.");
         }
 
         var value = commandLine[start..].Trim().TrimEnd('"');
         if (!Uri.TryCreate(value, UriKind.Absolute, out var uri)
             || !uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
-            || !uri.Host.Equals("login.microsoftonline.com", StringComparison.OrdinalIgnoreCase))
+            || !allowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
         {
-            throw new CliException("The captured browser URL was not a valid Entra authorization URL.");
+            throw new CliException("The captured browser URL was not valid for an allowed host.");
         }
 
         return uri.AbsoluteUri;
     }
 
-    internal static void ValidateAuthorizationUrl(string authorizationUrl, int callbackPort)
+    internal static void ValidateAuthorizationUrl(
+        string authorizationUrl,
+        int callbackPort,
+        AuthorizationPolicy policy)
     {
         var uri = new Uri(authorizationUrl);
+        if (!uri.Scheme.Equals(Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+            || !policy.AllowedHosts.Contains(uri.Host, StringComparer.OrdinalIgnoreCase))
+        {
+            throw new CliException("The authorization URL host is not allowed by the profile.");
+        }
+
         var query = HttpUtility.ParseQueryString(uri.Query);
-        var redirectUri = query["redirect_uri"];
-        var expected = $"http://localhost:{callbackPort}";
+        var redirectUri = query[policy.RedirectUriParameter];
+        var expected = policy.RedirectUriTemplate.Replace(
+            "{callbackPort}",
+            callbackPort.ToString(System.Globalization.CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
 
         if (!string.Equals(redirectUri, expected, StringComparison.OrdinalIgnoreCase))
         {
             throw new CliException(
-                $"azd requested redirect URI '{redirectUri}', but LoopKey expected '{expected}'.");
+                $"The login command requested redirect URI '{redirectUri}', but LoopKey expected '{expected}'.");
         }
 
-        if (string.IsNullOrWhiteSpace(query["state"])
-            || string.IsNullOrWhiteSpace(query["code_challenge"])
-            || !string.Equals(query["code_challenge_method"], "S256", StringComparison.Ordinal))
+        foreach (var parameter in policy.RequiredQueryParameters)
         {
-            throw new CliException("The authorization URL is missing required state or PKCE parameters.");
+            if (string.IsNullOrWhiteSpace(query[parameter]))
+            {
+                throw new CliException(
+                    $"The authorization URL is missing required query parameter '{parameter}'.");
+            }
+        }
+        foreach (var pair in policy.RequiredQueryValues)
+        {
+            if (!string.Equals(query[pair.Key], pair.Value, StringComparison.Ordinal))
+            {
+                throw new CliException(
+                    $"The authorization URL query parameter '{pair.Key}' did not match the configured value.");
+            }
         }
     }
 
@@ -81,7 +119,7 @@ internal static class BrowserCapture
 
         if (result.ExitCode != 0 || string.IsNullOrWhiteSpace(result.StandardOutput))
         {
-            throw new CliException("Unable to inspect the azd browser launcher command line.");
+            throw new CliException("Unable to inspect the login command's browser launcher command line.");
         }
 
         return result.StandardOutput;

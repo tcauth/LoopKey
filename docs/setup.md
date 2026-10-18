@@ -2,11 +2,12 @@
 
 LoopKey runs on two Windows machines:
 
-- the **DevBox** keeps the `azd` process, PKCE verifier, and credential cache;
-- the **laptop** connects the private Dev Tunnel and opens the browser.
+- the **host** runs the configured authentication command and owns its local
+  credential state;
+- the **client** connects the private Dev Tunnel and opens the browser.
 
 Run setup once on each machine. The script is idempotent and verifies the
-downloaded release digest before installing it.
+downloaded executable against a release SHA-256 asset.
 
 ## Agent-assisted setup
 
@@ -16,124 +17,128 @@ Give an agent with terminal access this prompt:
 > machine. Follow `docs/setup.md`, install the user-scoped skill for your agent
 > host, complete Dev Tunnel login, and verify the documented postconditions.
 
-The agent should clone the public repository, inspect `scripts/setup.ps1`, and
-run the command for its current machine and agent host.
+The agent should inspect `scripts/setup.ps1` before executing it.
 
-For a machine without Git or GitHub CLI, download the versioned setup script
-first:
+For a machine without Git or GitHub CLI, download the versioned setup script:
 
 ```powershell
 $setup = Join-Path $env:TEMP "loopkey-setup.ps1"
 Invoke-WebRequest `
-  https://raw.githubusercontent.com/tcauth/LoopKey/v0.2.0-alpha.2/scripts/setup.ps1 `
+  https://raw.githubusercontent.com/tcauth/LoopKey/v0.3.0-alpha.1/scripts/setup.ps1 `
   -OutFile $setup
 Get-Content $setup
-& $setup -Role Laptop -Agent github-copilot
+& $setup -Role Client -Agent github-copilot
 ```
 
 Review the downloaded script before executing it.
 
-## Laptop
+## Client
 
 Run from a LoopKey checkout:
 
 ```powershell
-.\scripts\setup.ps1 -Role Laptop -Agent github-copilot
+.\scripts\setup.ps1 -Role Client -Agent github-copilot
 ```
 
-Use `codex`, `claude-code`, or `all` for `-Agent` as needed. The default is
-`all`. Setup:
+Use `codex`, `claude-code`, or `all` for `-Agent`. The default is `all`.
 
-1. installs Dev Tunnels CLI and GitHub CLI with `winget` when missing;
-2. downloads the newest published `loopkey.exe`;
-3. verifies its GitHub release SHA-256 digest;
-4. installs it under `%LOCALAPPDATA%\LoopKey`;
-5. adds that directory to the user `PATH`;
-6. installs the canonical LoopKey skill at user scope;
-7. opens Dev Tunnel browser authentication when needed.
+## Host
 
-## DevBox
-
-Run from a LoopKey checkout:
+Create and review a profile configuration for the authentication application.
+Start from `examples/profiles.example.json`, then run:
 
 ```powershell
-.\scripts\setup.ps1 -Role DevBox -Agent github-copilot
+.\scripts\setup.ps1 -Role Host -Agent github-copilot `
+  -ProfileConfig C:\path\to\profiles.json
 ```
 
-For Green, persist the tenant ID at setup time:
+The configuration is copied to
+`%USERPROFILE%\.loopkey\profiles.json` and validated by the installed binary.
+LoopKey does not install or configure the authentication application itself.
 
-```powershell
-.\scripts\setup.ps1 -Role DevBox -Agent github-copilot `
-  -GreenTenantId <green-tenant-id>
-```
+Host setup uses Dev Tunnel device-code authentication so no browser must open
+on the remote host. This authenticates Dev Tunnels only; it is unrelated to
+the authentication command later launched by a profile.
 
-If the environment uses Brix, also provide its established cache-refresh
-helper:
+## Dev Tunnel identity
 
-```powershell
-.\scripts\setup.ps1 -Role DevBox -Agent github-copilot `
-  -GreenTenantId <green-tenant-id> `
-  -GreenPostAuthScript C:\path\to\refresh-green-brix-cache.py
-```
-
-LoopKey runs this hook only after Green `azd` verification. A hook failure
-makes the overall request fail rather than reporting stale Brix credentials as
-success.
-
-In addition to the common setup, the DevBox role installs Azure Developer CLI
-when needed and creates isolated wrappers:
+The client and host must use the same Dev Tunnel identity. Setup writes a
+non-secret identity summary to:
 
 ```text
-%USERPROFILE%\.azd-profiles\azd-corp.cmd
-%USERPROFILE%\.azd-profiles\azd-green.cmd
+%LOCALAPPDATA%\LoopKey\devtunnel-identity.json
 ```
 
-DevBox setup uses Dev Tunnel device-code authentication so no browser must open
-inside the remote desktop. This device code authenticates Dev Tunnels only; it
-is not used for Corp or Green `azd` authentication.
+Pass `-ExpectedDevTunnelUser <user>` on the second machine to fail setup when
+the identities differ.
 
-The laptop and DevBox must use the same Dev Tunnel identity. Setup writes a
-non-secret identity summary to
-`%LOCALAPPDATA%\LoopKey\devtunnel-identity.json`. Pass
-`-ExpectedDevTunnelUser <user>` on the second machine to fail setup if the
-accounts differ.
+## Profile schema
+
+The root object contains a `profiles` map. Each profile has:
+
+| Field | Required | Purpose |
+|---|---:|---|
+| `login.command` | yes | Executable, `.cmd`, or `.bat` launched on the host |
+| `login.arguments` | yes | Arguments containing `{callbackPort}` |
+| `login.environment` | no | Environment supplied only to the login command |
+| `verification.command` | yes | Non-interactive command used to prove success |
+| `verification.arguments` | yes | Verification arguments |
+| `verification.successOutputContains` | yes | Exact case-sensitive success marker |
+| `authorization.allowedHosts` | yes | Exact HTTPS authorization host allowlist |
+| `authorization.redirectUriParameter` | yes | Query key containing the redirect URI |
+| `authorization.redirectUriTemplate` | yes | Exact loopback URI containing `{callbackPort}` |
+| `authorization.requiredQueryParameters` | no | Query keys that must be nonempty |
+| `authorization.requiredQueryValues` | no | Query keys that must equal fixed values |
+| `postAuth` | no | Generic command object run after verification |
+
+Command strings, arguments, and environment values support Windows environment
+expansion such as `%USERPROFILE%`.
+
+The login command must honor the `BROWSER` environment variable and invoke it
+with the complete HTTPS authorization URL. The URL must use the profile's
+configured loopback redirect URI template.
+
+Validate a file before installing or using it:
+
+```powershell
+loopkey config validate --config C:\path\to\profiles.json
+```
+
+Profiles are trusted code because their commands execute locally. Do not use a
+profile from an untrusted source.
 
 ## Postconditions
 
-Laptop:
+Client:
 
 ```powershell
-& "$env:LOCALAPPDATA\LoopKey\loopkey.exe" --help
+& "$env:LOCALAPPDATA\LoopKey\loopkey.exe" --version
 devtunnel user show
 gh skill list
 ```
 
-DevBox:
+Host:
 
 ```powershell
-& "$env:LOCALAPPDATA\LoopKey\loopkey.exe" --help
+& "$env:LOCALAPPDATA\LoopKey\loopkey.exe" --version
+& "$env:LOCALAPPDATA\LoopKey\loopkey.exe" config validate
 devtunnel user show
-Test-Path "$env:USERPROFILE\.azd-profiles\azd-corp.cmd"
-Test-Path "$env:USERPROFILE\.azd-profiles\azd-green.cmd"
 ```
 
-Start a new terminal after the first setup if `loopkey` is not yet resolved
-from `PATH`.
+Start a new terminal after first setup if `loopkey` is not yet resolved from
+`PATH`.
 
 ## Non-default options
 
 - `-Version <tag>` selects a release other than the script's pinned default.
-  Setup downloads both `loopkey.exe` and its release checksum without using
-  the rate-limited GitHub API.
 - `-Agent none` skips agent skill installation.
-- `-SkipDevTunnelLogin` installs files without starting interactive Dev Tunnel
-  authentication.
-- `-InstallDirectory` and `-WrapperDirectory` support controlled test or
-  non-default locations.
-- `-ExpectedDevTunnelUser <user>` requires the expected private-tunnel owner.
-- `-GreenPostAuthScript <path>` configures a fail-closed Green integration
-  hook such as the established Brix cache refresh helper.
-- `-SkipPathUpdate` leaves the user `PATH` unchanged.
+- `-SkillRef <ref>` installs the skill from a different tag or commit.
+- `-ProfileConfig <path>` installs a reviewed host profile file.
+- `-ConfigurationPath <path>` changes the installed profile path.
+- `-SkipDevTunnelLogin` installs files without starting Dev Tunnel login.
+- `-InstallDirectory <path>` supports controlled tests or non-default layouts.
+- `-ExpectedDevTunnelUser <user>` requires the expected tunnel owner.
+- `-SkipPathUpdate` leaves user `PATH` unchanged.
 
 Do not use `-SkipDevTunnelLogin` for a production setup unless
 `devtunnel user show` already succeeds.

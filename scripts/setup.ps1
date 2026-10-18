@@ -1,23 +1,21 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet("Laptop", "DevBox")]
+    [ValidateSet("Client", "Host")]
     [string]$Role,
 
     [ValidateSet("github-copilot", "codex", "claude-code", "all", "none")]
     [string]$Agent = "all",
 
-    [string]$Version = "v0.2.0-alpha.2",
+    [string]$Version = "v0.3.0-alpha.1",
 
     [string]$SkillRef,
 
     [string]$InstallDirectory = (Join-Path $env:LOCALAPPDATA "LoopKey"),
 
-    [string]$WrapperDirectory = (Join-Path $env:USERPROFILE ".azd-profiles"),
+    [string]$ProfileConfig,
 
-    [string]$GreenTenantId,
-
-    [string]$GreenPostAuthScript,
+    [string]$ConfigurationPath = (Join-Path $env:USERPROFILE ".loopkey\profiles.json"),
 
     [string]$ExpectedDevTunnelUser,
 
@@ -164,40 +162,6 @@ function Install-AgentSkill {
     }
 }
 
-function Install-AzdWrappers {
-    Ensure-Command "azd" "Microsoft.Azd"
-    $azdPath = (Get-Command azd -ErrorAction Stop).Source
-    New-Item -ItemType Directory -Force -Path $WrapperDirectory | Out-Null
-
-    foreach ($profile in @("corp", "green")) {
-        $cacheDirectory = ".azd-$profile"
-        $wrapperPath = Join-Path $WrapperDirectory "azd-$profile.cmd"
-        $content = "@echo off`r`nset `"AZD_CONFIG_DIR=%USERPROFILE%\$cacheDirectory`"`r`n`"$azdPath`" %*`r`n"
-        Set-Content -Path $wrapperPath -Value $content -Encoding Ascii -NoNewline
-    }
-
-    if (-not [string]::IsNullOrWhiteSpace($GreenTenantId)) {
-        [Environment]::SetEnvironmentVariable("LOOPKEY_GREEN_TENANT_ID", $GreenTenantId, "User")
-        $env:LOOPKEY_GREEN_TENANT_ID = $GreenTenantId
-    }
-    if (-not [string]::IsNullOrWhiteSpace($GreenPostAuthScript)) {
-        $resolvedPostAuthScript = (Resolve-Path $GreenPostAuthScript -ErrorAction Stop).Path
-        if (
-            [IO.Path]::GetExtension($resolvedPostAuthScript).Equals(
-                ".py",
-                [StringComparison]::OrdinalIgnoreCase) -and
-            -not (Get-Command python -ErrorAction SilentlyContinue)
-        ) {
-            throw "The configured Python Green post-auth script requires 'python' in PATH."
-        }
-        [Environment]::SetEnvironmentVariable(
-            "LOOPKEY_GREEN_POST_AUTH_SCRIPT",
-            $resolvedPostAuthScript,
-            "User")
-        $env:LOOPKEY_GREEN_POST_AUTH_SCRIPT = $resolvedPostAuthScript
-    }
-}
-
 function Ensure-DevTunnelLogin {
     if ($SkipDevTunnelLogin) {
         return
@@ -208,7 +172,7 @@ function Ensure-DevTunnelLogin {
         return
     }
 
-    $authentication = if ($Role -eq "Laptop") {
+    $authentication = if ($Role -eq "Client") {
         "--use-browser-auth"
     }
     else {
@@ -255,12 +219,9 @@ if (-not [Environment]::Is64BitOperatingSystem) {
 }
 
 Ensure-Command "devtunnel" "Microsoft.devtunnel"
-if ($Role -eq "DevBox") {
-    Install-AzdWrappers
-}
 
 if ($Version -notmatch "^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$") {
-    throw "Version must be a release tag such as v0.2.0-alpha.2."
+    throw "Version must be a release tag such as v0.3.0-alpha.1."
 }
 $resolvedVersion = $Version
 Install-LoopKey $resolvedVersion
@@ -281,14 +242,40 @@ if ($installedVersion.Trim() -ne $expectedVersion) {
 }
 Invoke-Checked "devtunnel" @("user", "show")
 
+if (-not [string]::IsNullOrWhiteSpace($ProfileConfig)) {
+    $resolvedProfileConfig = (Resolve-Path $ProfileConfig -ErrorAction Stop).Path
+    Invoke-Checked $loopkeyPath @("config", "validate", "--config", $resolvedProfileConfig)
+    $configurationDirectory = Split-Path -Parent $ConfigurationPath
+    New-Item -ItemType Directory -Force -Path $configurationDirectory | Out-Null
+    $resolvedConfigurationPath = [IO.Path]::GetFullPath($ConfigurationPath)
+    if (-not $resolvedProfileConfig.Equals(
+        $resolvedConfigurationPath,
+        [StringComparison]::OrdinalIgnoreCase)) {
+        $temporaryConfig = "$resolvedConfigurationPath.$([Guid]::NewGuid().ToString('N')).tmp"
+        try {
+            Copy-Item -Force -Path $resolvedProfileConfig -Destination $temporaryConfig
+            Move-Item -Force -Path $temporaryConfig -Destination $resolvedConfigurationPath
+        }
+        finally {
+            Remove-Item -Force -ErrorAction SilentlyContinue $temporaryConfig
+        }
+    }
+}
+if (Test-Path $ConfigurationPath) {
+    Invoke-Checked $loopkeyPath @("config", "validate", "--config", $ConfigurationPath)
+}
+
 Write-Host ""
 Write-Host "LoopKey setup complete."
 Write-Host "Role: $Role"
 Write-Host "Version: $resolvedVersion"
 Write-Host "Executable: $loopkeyPath"
 Write-Host "Dev Tunnel identity: $($devTunnelIdentity.username) ($($devTunnelIdentity.provider))"
-if ($Role -eq "DevBox") {
-    Write-Host "Wrappers: $WrapperDirectory"
+if (Test-Path $ConfigurationPath) {
+    Write-Host "Profiles: $ConfigurationPath"
+}
+elseif ($Role -eq "Host") {
+    Write-Host "No profile configuration was installed. Use -ProfileConfig before requesting authentication."
 }
 if (-not $SkipPathUpdate) {
     Write-Host "The user PATH is configured. Existing terminals may need to be restarted."

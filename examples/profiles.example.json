@@ -1,0 +1,42 @@
+{
+  "profiles": {
+    "work": {
+      "login": {
+        "command": "C:\\Tools\\auth-cli.cmd",
+        "arguments": [
+          "login",
+          "--redirect-port",
+          "{callbackPort}"
+        ],
+        "environment": {
+          "AUTH_INTERACTIVE": "true"
+        }
+      },
+      "verification": {
+        "command": "C:\\Tools\\auth-cli.cmd",
+        "arguments": [
+          "status"
+        ],
+        "successOutputContains": "Logged in"
+      },
+      "authorization": {
+        "allowedHosts": [
+          "login.example.com"
+        ],
+        "redirectUriParameter": "redirect_uri",
+        "redirectUriTemplate": "http://localhost:{callbackPort}",
+        "requiredQueryParameters": [
+          "state",
+          "code_challenge"
+        ],
+        "requiredQueryValues": {
+          "code_challenge_method": "S256"
+        }
+      },
+      "postAuth": {
+        "command": "C:\\Tools\\after-login.cmd",
+        "arguments": []
+      }
+    }
+  }
+}

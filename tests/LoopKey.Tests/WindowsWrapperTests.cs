@@ -12,7 +12,7 @@ public class WindowsWrapperTests
 
         var directory = Path.Combine(Path.GetTempPath(), $"LoopKey Test {Guid.NewGuid():N}");
         Directory.CreateDirectory(directory);
-        var wrapper = Path.Combine(directory, "fake azd.cmd");
+        var wrapper = Path.Combine(directory, "fake auth.cmd");
         await File.WriteAllTextAsync(wrapper, "@echo off\r\necho %*\r\n");
 
         try
