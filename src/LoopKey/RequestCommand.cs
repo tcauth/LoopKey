@@ -11,6 +11,10 @@ internal static class RequestCommand
     {
         EnsureWindows();
         EnsureFileExists(options.AzdPath, "azd wrapper");
+        if (options.GreenPostAuthScript is not null)
+        {
+            EnsureFileExists(options.GreenPostAuthScript, "Green post-auth script");
+        }
         EnsurePortAvailable(options.CallbackPort);
         EnsurePortAvailable(options.MetadataPort);
 
@@ -129,6 +133,23 @@ internal static class RequestCommand
                 throw new CliException($"azd profile verification failed.\n{check.CombinedOutput}");
             }
 
+            if (options.GreenPostAuthScript is not null)
+            {
+                var postAuth = await RunPostAuthScriptAsync(
+                    options.GreenPostAuthScript,
+                    cancellationToken);
+                if (postAuth.ExitCode != 0)
+                {
+                    state.SetStatus("failed", "Green authentication succeeded, but the post-auth script failed.");
+                    await WaitForStatusObservationAsync(state, cancellationToken);
+                    throw new CliException(
+                        $"Green post-auth script failed with exit code {postAuth.ExitCode}.\n"
+                        + postAuth.CombinedOutput);
+                }
+
+                Console.WriteLine("Green post-auth script completed successfully.");
+            }
+
             state.SetStatus("succeeded", $"Authenticated {options.Profile} profile on the DevBox.");
             await WaitForStatusObservationAsync(state, cancellationToken);
             Console.WriteLine($"Authenticated {options.Profile} profile successfully.");
@@ -238,6 +259,38 @@ internal static class RequestCommand
         {
             throw new CliException($"{fileName} failed.\n{result.CombinedOutput}");
         }
+    }
+
+    internal static Task<ProcessResult> RunPostAuthScriptAsync(
+        string path,
+        CancellationToken cancellationToken)
+    {
+        var extension = Path.GetExtension(path).ToLowerInvariant();
+        return extension switch
+        {
+            ".ps1" => ProcessRunner.RunAsync(
+                "powershell.exe",
+                ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", path],
+                environment: null,
+                cancellationToken),
+            ".py" => ProcessRunner.RunAsync(
+                "python",
+                [path],
+                environment: null,
+                cancellationToken),
+            ".cmd" or ".bat" => ProcessRunner.RunRawAsync(
+                "cmd.exe",
+                BuildCmdArguments(path, []),
+                environment: null,
+                cancellationToken),
+            ".exe" => ProcessRunner.RunAsync(
+                path,
+                [],
+                environment: null,
+                cancellationToken),
+            _ => throw new CliException(
+                "Green post-auth script must use a .ps1, .py, .cmd, .bat, or .exe extension."),
+        };
     }
 
     private static async Task WaitForStatusObservationAsync(

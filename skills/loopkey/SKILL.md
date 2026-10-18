@@ -1,11 +1,11 @@
 ---
 name: loopkey
-description: Complete Corp or Green browser authentication for a remote Windows DevBox through a private Dev Tunnel. Use when an agent is blocked by expired azd credentials, interactive Entra login, MFA, Conditional Access, or a localhost OAuth callback that must be completed from the user's laptop.
+description: Install or use LoopKey for Corp or Green browser authentication on a remote Windows DevBox through a private Dev Tunnel. Use for LoopKey setup, expired azd credentials, interactive Entra login, MFA, Conditional Access, or a localhost OAuth callback that must be completed from the user's laptop.
 license: MIT
 compatibility: Requires Windows, loopkey.exe, Microsoft Dev Tunnels CLI, and the azd-corp or azd-green wrapper on the DevBox. The laptop needs loopkey.exe and Dev Tunnels CLI.
 metadata:
   author: tcauth
-  version: "0.1.0"
+  version: "0.2.0-alpha.1"
 ---
 
 # LoopKey remote authentication
@@ -13,6 +13,29 @@ metadata:
 Use LoopKey to keep the OAuth client, PKCE verifier, and credential cache on
 the DevBox while the user completes interactive Entra authentication in the
 laptop browser.
+
+## Setup requests
+
+When the user explicitly asks to install or configure LoopKey:
+
+1. Work from a trusted checkout of `https://github.com/tcauth/LoopKey`.
+2. Read `docs/setup.md` and inspect `scripts/setup.ps1` before executing it.
+3. Run setup for the current machine and agent host:
+
+   ```powershell
+   .\scripts\setup.ps1 -Role <Laptop|DevBox> -Agent <github-copilot|codex|claude-code>
+   ```
+
+4. On a Green DevBox, pass the known tenant with
+   `-GreenTenantId <green-tenant-id>`. Never guess it.
+   If Brix is used and the environment has an established refresh helper,
+   pass it with `-GreenPostAuthScript <path>`. LoopKey will fail the request if
+   that hook fails after Green profile verification.
+5. Allow the setup script to install missing prerequisites only because the
+   user explicitly requested setup. Do not initiate setup during an unrelated
+   authentication request.
+6. Complete the postconditions in `docs/setup.md`. Do not report success
+   merely because package installation exited successfully.
 
 ## When to use
 
@@ -56,7 +79,11 @@ callback.
 2. Confirm the prerequisites without exposing credentials:
 
    ```powershell
-   loopkey --help
+   $loopkey = Get-Command loopkey -ErrorAction SilentlyContinue
+   if (-not $loopkey) {
+     $loopkey = Get-Item "$env:LOCALAPPDATA\LoopKey\loopkey.exe" -ErrorAction Stop
+   }
+   & $loopkey.Source --help
    devtunnel user show
    Test-Path "$env:USERPROFILE\.azd-profiles\azd-corp.cmd"
    Test-Path "$env:USERPROFILE\.azd-profiles\azd-green.cmd"
@@ -71,17 +98,21 @@ callback.
    Corp:
 
    ```powershell
-   loopkey request --profile corp
+   & $loopkey.Source request --profile corp
    ```
 
    Green:
 
    ```powershell
-   loopkey request --profile green --tenant-id <green-tenant-id>
+   & $loopkey.Source request --profile green --tenant-id <green-tenant-id>
    ```
 
    `LOOPKEY_GREEN_TENANT_ID` may replace the explicit Green tenant argument
    when it is already configured.
+
+   `LOOPKEY_GREEN_POST_AUTH_SCRIPT` may identify an optional `.ps1`, `.py`,
+   `.cmd`, `.bat`, or `.exe` hook. LoopKey runs it only after Green `azd`
+   verification and treats a nonzero exit as authentication failure.
 
 4. Wait until LoopKey prints:
 
@@ -111,10 +142,10 @@ callback.
    that originally failed. A generic `azd` login check is not a substitute for
    validating the target resource and scopes.
 
-8. For Green authentication, refresh Brix's
-   `~/.brix/azure/access_tokens` cache using the environment's established
-   refresh procedure, then rerun the Brix token check. A successful
-   `azd-green` check alone does not refresh Brix.
+8. For Green authentication with Brix, require a configured
+   `LOOPKEY_GREEN_POST_AUTH_SCRIPT`, then rerun the Brix token check. A
+   successful `azd-green` check alone does not prove that Brix's
+   `~/.brix/azure/access_tokens` cache was refreshed.
 
 9. Resume the blocked task only after the profile-specific and target-resource
    checks pass.
@@ -139,8 +170,9 @@ check passed. Do not include token contents.
 
 ## Failure handling
 
-- **`loopkey` or `devtunnel` missing:** report the missing prerequisite and
-  stop. Do not install software or alter `PATH` without permission.
+- **`loopkey` or `devtunnel` missing during authentication:** report the
+  missing prerequisite and stop. Do not install software or alter `PATH`
+  unless the user explicitly asks for setup.
 - **Dev Tunnel authentication failure:** report the exact error. Do not enable
   anonymous access.
 - **Port in use:** retry only with two known-free ports by passing

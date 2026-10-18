@@ -32,16 +32,47 @@ private tunnel rather than placed in shell history.
 Both the DevBox and laptop need:
 
 - Windows;
-- [Microsoft Dev Tunnels CLI](https://learn.microsoft.com/azure/developer/dev-tunnels/);
-- an authenticated `devtunnel` identity authorized for the private tunnel;
-- the `loopkey.exe` release artifact.
+- Windows Package Manager (`winget`).
 
-The DevBox additionally needs Azure Developer CLI and the profile wrapper:
+The setup script installs and configures the remaining prerequisites.
+
+## Quick start
+
+An agent with terminal access can complete setup from the public repository.
+Give it this prompt:
+
+> Set up LoopKey from https://github.com/tcauth/LoopKey on this Windows
+> machine. Follow `docs/setup.md`, install the user-scoped skill for your agent
+> host, complete Dev Tunnel login, and verify the documented postconditions.
+
+Or run setup directly from a LoopKey checkout.
+
+Laptop:
+
+```powershell
+.\scripts\setup.ps1 -Role Laptop -Agent github-copilot
+```
+
+DevBox:
+
+```powershell
+.\scripts\setup.ps1 -Role DevBox -Agent github-copilot
+```
+
+Use `codex`, `claude-code`, or `all` for `-Agent`. For Green, add
+`-GreenTenantId <green-tenant-id>` to the DevBox command. Setup installs the
+verified release binary, configures user `PATH`, installs missing CLI
+prerequisites, authenticates Dev Tunnels, installs the canonical skill at user
+scope, and creates the DevBox profile wrappers:
 
 ```text
 %USERPROFILE%\.azd-profiles\azd-corp.cmd
 %USERPROFILE%\.azd-profiles\azd-green.cmd
 ```
+
+See [`docs/setup.md`](docs/setup.md) for exact behavior, verification, pinning,
+the no-Git bootstrap command, matching Dev Tunnel identity checks, Green
+post-auth hooks, and non-default options.
 
 ## Usage
 
@@ -108,7 +139,9 @@ canonical file:
 
 The adapters contain only standard Agent Skills metadata and a canonical-file
 reference. Authentication instructions and security invariants are not copied
-between agent hosts.
+between agent hosts. Normal installation uses `gh skill install` through
+`scripts/setup.ps1`, which copies the canonical skill into each selected
+agent's user-scoped skill directory so it is available from any repository.
 
 ## Build and test
 
@@ -122,5 +155,6 @@ executable.
 
 ## Status
 
-The repository contains the initial end-to-end CLI implementation. It still
-needs validation against a fresh Corp and Green login before a first release.
+LoopKey `v0.2.0-alpha.1` has been validated end to end with fresh Corp and
+Green logins between a remote Windows DevBox and a laptop. It remains an
+experimental alpha release.

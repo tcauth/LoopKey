@@ -1,4 +1,5 @@
 using System.Globalization;
+using System.Reflection;
 
 namespace LoopKey;
 
@@ -10,6 +11,7 @@ internal static class Cli
         Usage:
           loopkey request --profile <corp|green> [options]
           loopkey connect <tunnel-id> <request-id> [options]
+          loopkey --version
 
         Request options:
           --tenant-id <id>          Entra tenant. Corp defaults to the Microsoft tenant.
@@ -18,6 +20,8 @@ internal static class Cli
           --expires-minutes <n>     Request lifetime (default: 10).
           --tunnel-id <id>          Dev Tunnel ID (default: generated).
           --azd <path>              azd wrapper path (default: profile-specific wrapper).
+          --green-post-auth-script <path>
+                                    Optional .ps1, .py, .cmd, .bat, or .exe hook.
 
         Connect options:
           --metadata-port <port>    Private request metadata port (default: 8401).
@@ -40,6 +44,11 @@ internal static class Cli
             if (args.Length == 0 || args[0] is "-h" or "--help" or "help")
             {
                 Console.WriteLine(Usage);
+                return 0;
+            }
+            if (args[0] is "-v" or "--version" or "version")
+            {
+                Console.WriteLine($"loopkey {Version}");
                 return 0;
             }
 
@@ -90,6 +99,12 @@ internal static class Cli
 
         var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
         var defaultAzd = Path.Combine(home, ".azd-profiles", $"azd-{profile}.cmd");
+        var greenPostAuthScript = GetOptional(values, "--green-post-auth-script")
+            ?? Environment.GetEnvironmentVariable("LOOPKEY_GREEN_POST_AUTH_SCRIPT");
+        if (profile != "green" && greenPostAuthScript is not null)
+        {
+            throw new CliException("--green-post-auth-script can be used only with the green profile.");
+        }
 
         return new RequestOptions(
             profile,
@@ -98,7 +113,8 @@ internal static class Cli
             ParsePort(values, "--metadata-port", 8401),
             ParsePositiveInt(values, "--expires-minutes", 10),
             GetOptional(values, "--tunnel-id"),
-            GetOptional(values, "--azd") ?? defaultAzd);
+            GetOptional(values, "--azd") ?? defaultAzd,
+            greenPostAuthScript);
     }
 
     internal static ConnectOptions ParseConnectOptions(string[] args)
@@ -203,6 +219,12 @@ internal static class Cli
 
         return result;
     }
+
+    internal static string Version =>
+        typeof(Cli).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?
+            .InformationalVersion.Split('+')[0]
+        ?? throw new CliException("Unable to determine the LoopKey version.");
 }
 
 internal sealed class CliException(string message) : Exception(message);
@@ -214,7 +236,8 @@ internal sealed record RequestOptions(
     int MetadataPort,
     int ExpiresMinutes,
     string? TunnelId,
-    string AzdPath)
+    string AzdPath,
+    string? GreenPostAuthScript)
 {
     public const string MicrosoftTenantId = "72f988bf-86f1-41af-91ab-2d7cd011db47";
 }

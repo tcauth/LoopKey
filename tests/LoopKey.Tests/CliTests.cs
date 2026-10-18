@@ -15,6 +15,39 @@ public class CliTests
             Path.Combine(".azd-profiles", "azd-corp.cmd"),
             options.AzdPath,
             StringComparison.OrdinalIgnoreCase);
+        Assert.Null(options.GreenPostAuthScript);
+    }
+
+    [Fact]
+    public void GreenRequestAcceptsPostAuthScript()
+    {
+        var options = Cli.ParseRequestOptions(
+            [
+                "--profile", "green",
+                "--tenant-id", "green-tenant",
+                "--green-post-auth-script", @"C:\tools\refresh.py",
+            ]);
+
+        Assert.Equal(@"C:\tools\refresh.py", options.GreenPostAuthScript);
+    }
+
+    [Fact]
+    public void CorpRequestRejectsGreenPostAuthScript()
+    {
+        var exception = Assert.Throws<CliException>(
+            () => Cli.ParseRequestOptions(
+                [
+                    "--profile", "corp",
+                    "--green-post-auth-script", @"C:\tools\refresh.py",
+                ]));
+
+        Assert.Contains("only with the green profile", exception.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void ReportsPackageVersion()
+    {
+        Assert.Equal("0.2.0-alpha.1", Cli.Version);
     }
 
     [Fact]

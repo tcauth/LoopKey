@@ -1,6 +1,6 @@
 ---
 name: loopkey
-description: Complete Corp or Green browser authentication for a remote Windows DevBox through a private Dev Tunnel. Use when blocked by expired azd credentials, interactive Entra login, MFA, Conditional Access, or a localhost OAuth callback.
+description: Install or use LoopKey for Corp or Green browser authentication on a remote Windows DevBox through a private Dev Tunnel. Use for setup, expired azd credentials, interactive Entra login, MFA, Conditional Access, or a localhost OAuth callback.
 license: MIT
 compatibility: Requires the LoopKey repository workflow and Windows prerequisites described by the canonical skill.
 metadata:
