@@ -89,6 +89,27 @@ Use `loopkey --help` for port, expiration, tunnel ID, and wrapper overrides.
 The current prototype does not yet refresh Brix's Green token cache. A Green
 integration must perform that separate refresh after `azd` verification.
 
+## Agent skill
+
+The complete agent workflow is maintained once in:
+
+```text
+skills/loopkey/SKILL.md
+```
+
+Thin discovery adapters point GitHub Copilot, Codex, and Claude Code to that
+canonical file:
+
+```text
+.github/skills/loopkey/SKILL.md  # GitHub Copilot
+.agents/skills/loopkey/SKILL.md  # Codex
+.claude/skills/loopkey/SKILL.md  # Claude Code
+```
+
+The adapters contain only standard Agent Skills metadata and a canonical-file
+reference. Authentication instructions and security invariants are not copied
+between agent hosts.
+
 ## Build and test
 
 ```powershell
