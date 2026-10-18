@@ -47,7 +47,7 @@ public class CliTests
     [Fact]
     public void ReportsPackageVersion()
     {
-        Assert.Equal("0.2.0-alpha.1", Cli.Version);
+        Assert.Equal("0.2.0-alpha.2", Cli.Version);
     }
 
     [Fact]

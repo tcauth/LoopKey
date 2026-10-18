@@ -25,7 +25,7 @@ first:
 ```powershell
 $setup = Join-Path $env:TEMP "loopkey-setup.ps1"
 Invoke-WebRequest `
-  https://raw.githubusercontent.com/tcauth/LoopKey/v0.2.0-alpha.1/scripts/setup.ps1 `
+  https://raw.githubusercontent.com/tcauth/LoopKey/v0.2.0-alpha.2/scripts/setup.ps1 `
   -OutFile $setup
 Get-Content $setup
 & $setup -Role Laptop -Agent github-copilot
@@ -122,8 +122,9 @@ from `PATH`.
 
 ## Non-default options
 
-- `-Version <tag>` pins the release instead of selecting the newest published
-  non-draft release.
+- `-Version <tag>` selects a release other than the script's pinned default.
+  Setup downloads both `loopkey.exe` and its release checksum without using
+  the rate-limited GitHub API.
 - `-Agent none` skips agent skill installation.
 - `-SkipDevTunnelLogin` installs files without starting interactive Dev Tunnel
   authentication.

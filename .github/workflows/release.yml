@@ -26,6 +26,9 @@ jobs:
           if ($actual -ne "loopkey $expected") {
             throw "Tag $env:GITHUB_REF_NAME does not match binary version '$actual'."
           }
+          $hash = (Get-FileHash .\artifacts\win-x64\loopkey.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  loopkey.exe" |
+            Set-Content .\artifacts\win-x64\loopkey.exe.sha256 -Encoding Ascii -NoNewline
       - name: Publish release asset
         shell: bash
         env:
@@ -35,4 +38,7 @@ jobs:
           if ! gh release view "$tag" >/dev/null 2>&1; then
             gh release create "$tag" --prerelease --generate-notes --title "$tag"
           fi
-          gh release upload "$tag" ./artifacts/win-x64/loopkey.exe --clobber
+          gh release upload "$tag" \
+            ./artifacts/win-x64/loopkey.exe \
+            ./artifacts/win-x64/loopkey.exe.sha256 \
+            --clobber

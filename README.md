@@ -155,6 +155,6 @@ executable.
 
 ## Status
 
-LoopKey `v0.2.0-alpha.1` has been validated end to end with fresh Corp and
+LoopKey `v0.2.0-alpha.2` has been validated end to end with fresh Corp and
 Green logins between a remote Windows DevBox and a laptop. It remains an
 experimental alpha release.

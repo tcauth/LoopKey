@@ -7,7 +7,7 @@ param(
     [ValidateSet("github-copilot", "codex", "claude-code", "all", "none")]
     [string]$Agent = "all",
 
-    [string]$Version = "latest",
+    [string]$Version = "v0.2.0-alpha.2",
 
     [string]$SkillRef,
 
@@ -83,51 +83,25 @@ function Ensure-Command {
     }
 }
 
-function Get-Release {
-    $headers = @{
-        Accept = "application/vnd.github+json"
-        "User-Agent" = "LoopKey-Setup"
-        "X-GitHub-Api-Version" = "2022-11-28"
-    }
-
-    if ($Version -eq "latest") {
-        $releases = @(
-            Invoke-RestMethod `
-                -Uri "https://api.github.com/repos/tcauth/LoopKey/releases?per_page=20" `
-                -Headers $headers
-        )
-        $release = $releases | Where-Object { -not $_.draft } | Select-Object -First 1
-        if ($null -eq $release) {
-            throw "No published LoopKey release was found."
-        }
-
-        return $release
-    }
-
-    return Invoke-RestMethod `
-        -Uri "https://api.github.com/repos/tcauth/LoopKey/releases/tags/$Version" `
-        -Headers $headers
-}
-
 function Install-LoopKey {
     param(
         [Parameter(Mandatory = $true)]
-        $Release
+        [string]$ResolvedVersion
     )
-
-    $asset = @($Release.assets) | Where-Object { $_.name -eq "loopkey.exe" } | Select-Object -First 1
-    if ($null -eq $asset) {
-        throw "Release $($Release.tag_name) does not contain loopkey.exe."
-    }
-    if ([string]::IsNullOrWhiteSpace($asset.digest) -or -not $asset.digest.StartsWith("sha256:")) {
-        throw "Release $($Release.tag_name) does not provide a SHA-256 digest for loopkey.exe."
-    }
 
     New-Item -ItemType Directory -Force -Path $InstallDirectory | Out-Null
     $temporaryPath = Join-Path ([IO.Path]::GetTempPath()) "loopkey-$([Guid]::NewGuid().ToString('N')).exe"
+    $checksumPath = "$temporaryPath.sha256"
+    $releaseBase = "https://github.com/tcauth/LoopKey/releases/download/$ResolvedVersion"
     try {
-        Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $temporaryPath -UseBasicParsing
-        $expected = $asset.digest.Substring("sha256:".Length).ToLowerInvariant()
+        Invoke-WebRequest -Uri "$releaseBase/loopkey.exe" -OutFile $temporaryPath -UseBasicParsing
+        Invoke-WebRequest -Uri "$releaseBase/loopkey.exe.sha256" -OutFile $checksumPath -UseBasicParsing
+        $checksum = (Get-Content -Raw $checksumPath).Trim()
+        if ($checksum -notmatch "^([0-9a-fA-F]{64})\s+loopkey\.exe$") {
+            throw "Release $ResolvedVersion contains an invalid loopkey.exe.sha256 file."
+        }
+
+        $expected = $Matches[1].ToLowerInvariant()
         $actual = (Get-FileHash -Path $temporaryPath -Algorithm SHA256).Hash.ToLowerInvariant()
         if ($actual -ne $expected) {
             throw "Downloaded loopkey.exe digest mismatch. Expected $expected, got $actual."
@@ -137,6 +111,7 @@ function Install-LoopKey {
     }
     finally {
         Remove-Item -Force -ErrorAction SilentlyContinue $temporaryPath
+        Remove-Item -Force -ErrorAction SilentlyContinue $checksumPath
     }
 }
 
@@ -284,10 +259,13 @@ if ($Role -eq "DevBox") {
     Install-AzdWrappers
 }
 
-$release = Get-Release
-Install-LoopKey $release
+if ($Version -notmatch "^v[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?$") {
+    throw "Version must be a release tag such as v0.2.0-alpha.2."
+}
+$resolvedVersion = $Version
+Install-LoopKey $resolvedVersion
 Add-UserPath
-Install-AgentSkill $release.tag_name
+Install-AgentSkill $resolvedVersion
 Ensure-DevTunnelLogin
 $devTunnelIdentity = Save-DevTunnelIdentity
 
@@ -297,16 +275,16 @@ $installedVersion = (& $loopkeyPath --version 2>&1) -join "`n"
 if ($LASTEXITCODE -ne 0) {
     throw "Installed loopkey.exe does not support version verification."
 }
-$expectedVersion = "loopkey $($release.tag_name.TrimStart('v'))"
+$expectedVersion = "loopkey $($resolvedVersion.TrimStart('v'))"
 if ($installedVersion.Trim() -ne $expectedVersion) {
-    throw "Release tag $($release.tag_name) does not match installed binary '$installedVersion'."
+    throw "Release tag $resolvedVersion does not match installed binary '$installedVersion'."
 }
 Invoke-Checked "devtunnel" @("user", "show")
 
 Write-Host ""
 Write-Host "LoopKey setup complete."
 Write-Host "Role: $Role"
-Write-Host "Version: $($release.tag_name)"
+Write-Host "Version: $resolvedVersion"
 Write-Host "Executable: $loopkeyPath"
 Write-Host "Dev Tunnel identity: $($devTunnelIdentity.username) ($($devTunnelIdentity.provider))"
 if ($Role -eq "DevBox") {

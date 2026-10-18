@@ -5,7 +5,7 @@ license: MIT
 compatibility: Requires Windows, loopkey.exe, Microsoft Dev Tunnels CLI, and the azd-corp or azd-green wrapper on the DevBox. The laptop needs loopkey.exe and Dev Tunnels CLI.
 metadata:
   author: tcauth
-  version: "0.2.0-alpha.1"
+  version: "0.2.0-alpha.2"
 ---
 
 # LoopKey remote authentication
