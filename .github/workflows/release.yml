@@ -27,13 +27,12 @@ jobs:
             throw "Tag $env:GITHUB_REF_NAME does not match binary version '$actual'."
           }
       - name: Publish release asset
-        shell: powershell
+        shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          $tag = $env:GITHUB_REF_NAME
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --prerelease --generate-notes --title $tag
-          }
-          gh release upload $tag .\artifacts\win-x64\loopkey.exe --clobber
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            gh release create "$tag" --prerelease --generate-notes --title "$tag"
+          fi
+          gh release upload "$tag" ./artifacts/win-x64/loopkey.exe --clobber
